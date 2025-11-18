@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================
-# Enhanced Multi-VM Manager - PROXMOX OPTIMIZED
+# Enhanced Multi-VM Manager
 # =============================
 
 # Function to display header
@@ -17,7 +17,7 @@ display_header() {
  | |  | | |__| | |    _| |_| |\  | |__| | |_) | |__| | | |   / /__ 
  |_|  |_|\____/|_|   |_____|_| \_|\_____|____/ \____/  |_|  /_____|
                                                                   
-                    PROXMOX OPTIMIZED - STABLE VERSION
+                    POWERED BY HOPINGBOYZ
 ========================================================================
 EOF
     echo
@@ -282,7 +282,7 @@ create_new_vm() {
     save_vm_config
 }
 
-# Function to setup VM image with FIXED NETWORK CONFIG
+# Function to setup VM image
 setup_vm_image() {
     print_status "INFO" "Downloading and preparing image..."
     
@@ -306,58 +306,34 @@ setup_vm_image() {
         print_status "WARN" "Failed to resize disk image. Creating new image with specified size..."
         # Create a new image with the specified size
         rm -f "$IMG_FILE"
+        qemu-img create -f qcow2 -F qcow2 -b "$IMG_FILE" "$IMG_FILE.tmp" "$DISK_SIZE" 2>/dev/null || \
         qemu-img create -f qcow2 "$IMG_FILE" "$DISK_SIZE"
+        if [ -f "$IMG_FILE.tmp" ]; then
+            mv "$IMG_FILE.tmp" "$IMG_FILE"
+        fi
     fi
 
-    # FIXED cloud-init configuration with NETWORK FIX
+    # cloud-init configuration
     cat > user-data <<EOF
 #cloud-config
 hostname: $HOSTNAME
 ssh_pwauth: true
 disable_root: false
-manage_etc_hosts: true
 users:
   - name: $USERNAME
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     password: $(openssl passwd -6 "$PASSWORD" | tr -d '\n')
-    groups: users, admin
-    home: /home/$USERNAME
-    system: false
 chpasswd:
   list: |
     root:$PASSWORD
     $USERNAME:$PASSWORD
   expire: false
-package_update: true
-package_upgrade: true
-packages:
-  - qemu-guest-agent
-  - curl
-  - wget
-  - net-tools
-  - iputils-ping
-runcmd:
-  - systemctl enable qemu-guest-agent
-  - systemctl start qemu-guest-agent
-  - [sh, -c, "echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"]
-  - systemctl restart ssh
-  - [sh, -c, "echo 'net.ipv6.conf.all.disable_ipv6 = 0' >> /etc/sysctl.conf"]
-  - [sh, -c, "echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf"]
-  - sysctl -p
-final_message: "The system is finally up, after \$UPTIME seconds"
 EOF
 
     cat > meta-data <<EOF
 instance-id: iid-$VM_NAME
 local-hostname: $HOSTNAME
-network:
-  version: 2
-  ethernets:
-    eth0:
-      dhcp4: true
-      dhcp6: true
-      optional: false
 EOF
 
     if ! cloud-localds "$SEED_FILE" user-data meta-data; then
@@ -368,7 +344,7 @@ EOF
     print_status "SUCCESS" "VM '$VM_NAME' created successfully."
 }
 
-# Function to start a VM - FIXED VERSION
+# Function to start a VM
 start_vm() {
     local vm_name=$1
     
@@ -389,58 +365,44 @@ start_vm() {
             setup_vm_image
         fi
         
-        # STABLE QEMU CONFIGURATION FOR PROXMOX
+        # Base QEMU command
         local qemu_cmd=(
             qemu-system-x86_64
-            -machine type=q35,accel=tcg
-            -cpu EPYC
-            -smp "$CPUS"
             -m "$MEMORY"
-            -drive "file=$IMG_FILE,format=qcow2,if=virtio,cache=writeback"
+            -smp "$CPUS"
+            -cpu qemu64
+            -drive "file=$IMG_FILE,format=qcow2,if=virtio"
             -drive "file=$SEED_FILE,format=raw,if=virtio"
-            -netdev "user,id=net0,hostfwd=tcp::$SSH_PORT-:22"
-            -device "virtio-balloon-pci"
-            -no-hpet
-            -global "kvm-pit.lost_tick_policy=discard"
-           -vga virtio \
-           -device intel-hda -device hda-duplex \
-           -usb -device usb-kbd -device usb-mouse \
-           
-      ) 
+            -boot order=c
+            -device virtio-net-pci,netdev=n0
+            -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22"
+        )
+
         # Add port forwards if specified
         if [[ -n "$PORT_FORWARDS" ]]; then
             IFS=',' read -ra forwards <<< "$PORT_FORWARDS"
-            local net_idx=1
             for forward in "${forwards[@]}"; do
                 IFS=':' read -r host_port guest_port <<< "$forward"
-                qemu_cmd+=(-netdev "user,id=net$net_idx,hostfwd=tcp::$host_port-:$guest_port")
-                qemu_cmd+=(-device "virtio-net-pci,netdev=net$net_idx")
-                ((net_idx++))
+                qemu_cmd+=(-device "virtio-net-pci,netdev=n${#qemu_cmd[@]}")
+                qemu_cmd+=(-netdev "user,id=n${#qemu_cmd[@]},hostfwd=tcp::$host_port-:$guest_port")
             done
         fi
 
-        # GUI mode configuration
+        # Add GUI or console mode
         if [[ "$GUI_MODE" == true ]]; then
-            qemu_cmd+=(
-                -vga "std"
-                -display "gtk"
-                -usb
-                -device "usb-tablet"
-            )
+            qemu_cmd+=(-vga virtio -display gtk,gl=on)
         else
-            qemu_cmd+=(-nographic -serial "mon:stdio")
+            qemu_cmd+=(-nographic -serial mon:stdio)
         fi
 
-        # Performance enhancements
+        # Add performance enhancements
         qemu_cmd+=(
-            -object "rng-random,filename=/dev/urandom,id=rng0"
-            -device "virtio-rng-pci,rng=rng0"
+            -device virtio-balloon-pci
+            -object rng-random,filename=/dev/urandom,id=rng0
+            -device virtio-rng-pci,rng=rng0
         )
 
-        print_status "INFO" "Starting QEMU with stable configuration..."
-        print_status "INFO" "Using CPU: Nehalem (optimized for Proxmox stability)"
-        
-        # Execute QEMU command
+        print_status "INFO" "Starting QEMU..."
         "${qemu_cmd[@]}"
         
         print_status "INFO" "VM $vm_name has been shut down"
@@ -491,15 +453,11 @@ show_vm_info() {
     fi
 }
 
-# Function to check if VM is running - FIXED VERSION
+# Function to check if VM is running
 is_vm_running() {
     local vm_name=$1
-    if load_vm_config "$vm_name" 2>/dev/null; then
-        if pgrep -f "qemu-system-x86_64.*$IMG_FILE" >/dev/null; then
-            return 0
-        else
-            return 1
-        fi
+    if pgrep -f "qemu-system-x86_64.*$vm_name" >/dev/null; then
+        return 0
     else
         return 1
     fi
@@ -901,13 +859,17 @@ check_dependencies
 VM_DIR="${VM_DIR:-$HOME/vms}"
 mkdir -p "$VM_DIR"
 
-# Supported OS list - Optimized for Proxmox
+# Supported OS list
 declare -A OS_OPTIONS=(
     ["Debian 13 (Trixie) - PROXMOX RECOMMENDED"]="debian|trixie|https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2|proxmox-debian13|proxmox|proxmox123"
-    ["Ubuntu 22.04 LTS"]="ubuntu|jammy|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu22|ubuntu|ubuntu"
-    ["Ubuntu 24.04 LTS"]="ubuntu|noble|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu24|ubuntu|ubuntu"
+    ["Ubuntu 22.04"]="ubuntu|jammy|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu22|ubuntu|ubuntu"
+    ["Ubuntu 24.04"]="ubuntu|noble|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu24|ubuntu|ubuntu"
+    ["Debian 11"]="debian|bullseye|https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2|debian11|debian|debian"
     ["Debian 12"]="debian|bookworm|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian12|debian|debian"
+    ["Fedora 40"]="fedora|40|https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-40-1.14.x86_64.qcow2|fedora40|fedora|fedora"
     ["CentOS Stream 9"]="centos|stream9|https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2|centos9|centos|centos"
+    ["AlmaLinux 9"]="almalinux|9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|almalinux9|alma|alma"
+    ["Rocky Linux 9"]="rockylinux|9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky9|rocky|rocky"
 )
 
 # Start the main menu
