@@ -375,10 +375,8 @@ start_vm() {
             -drive "file=$SEED_FILE,format=raw,if=virtio"
             -device "virtio-net-pci,netdev=net0,mq=on,vectors=16"
             -boot order=c
-            -machine "type=q35,accel=kvm"
             -global "kvm-pit.lost_tick_policy=discard" 
-            -no-hpet 
-            -object "rng-random,filename=/dev/urandom,id=rng0"
+            -no-hpet
             -rtc "base=utc,clock=host" 
             -device "virtio-rng-pci,rng=rng0"
             -device "virtio-balloon-pci"
